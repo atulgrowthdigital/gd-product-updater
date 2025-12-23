@@ -2,7 +2,7 @@
 
 client_id = "0ae9315e1db84f546ae6373227043ce6"
 name = "GD Product Updater"
-application_url = "https://example.com"
+application_url = "https://gd-product-updater.onrender.com"
 embedded = true
 
 [build]
@@ -24,4 +24,8 @@ api_version = "2026-01"
 scopes = "write_products"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [
+    "https://gd-product-updater.onrender.com/auth/callback",
+    "https://gd-product-updater.onrender.com/auth/shopify/callback",
+    "https://gd-product-updater.onrender.com/api/auth/callback"
+]
