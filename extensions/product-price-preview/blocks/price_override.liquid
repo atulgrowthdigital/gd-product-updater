@@ -1,0 +1,53 @@
+{% if request.page_type == 'product' %}
+  {% assign app_price_value = product.selected_or_first_available_variant.metafields.gd_product_updater.app_price.value %}
+  {% if app_price_value != blank %}
+    <script>
+      (function () {
+        const appPrice = '{{ app_price_value | money }}';
+
+        function updatePrice() {
+          // Common selectors for Shopify themes (Dawn, etc.)
+          const selectors = [
+            '.price-item--regular',
+            '.product__price',
+            '.price__regular .price-item',
+            '[data-product-price]',
+            // Fallback for some other themes
+            '.price .money',
+          ];
+
+          selectors.forEach((selector) => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach((el) => {
+              // Check if it looks like a main product price (heuristics)
+              // This acts as a simple override; for more complex themes more logic might be needed
+              if (!el.closest('.card-information')) {
+                // Avoid changing collection grid item prices if they happen to match
+                el.innerText = appPrice;
+              }
+            });
+          });
+        }
+
+        // Run on load
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', updatePrice);
+        } else {
+          updatePrice();
+        }
+
+        // Run on periodic check (helper for dynamic frameworks)
+        // setTimeout(updatePrice, 500);
+        // setTimeout(updatePrice, 1500);
+      })();
+    </script>
+  {% endif %}
+{% endif %}
+
+{% schema %}
+{
+  "name": "Price Overrider",
+  "target": "head",
+  "settings": []
+}
+{% endschema %}

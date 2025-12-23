@@ -59,6 +59,9 @@ export const loader = async ({ request }) => {
                   node {
                     id
                     price
+                    metafield(namespace: "gd_product_updater", key: "app_price") {
+                      value
+                    }
                   }
                 }
               }
@@ -80,6 +83,71 @@ export const loader = async ({ request }) => {
 export const action = async ({ request }) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
+
+  // Create Automatic Discount logic
+  if (formData.get("actionType") === "createDiscount") {
+    // 1. Find the function ID (checkout-price-adjust)
+    const functionsResponse = await admin.graphql(`#graphql
+      query {
+        shopifyFunctions(first: 25) {
+          nodes {
+            id
+            apiType
+            title
+          }
+        }
+      }
+    `);
+    const functionsData = await functionsResponse.json();
+    // Match by title or apiType. Title is "checkout-price-adjust" or what we set in toml name
+    const priceFunction = functionsData.data.shopifyFunctions.nodes.find(
+      node => node.title === "checkout-price-adjust" || node.apiType === "product_discounts"
+    );
+
+    if (!priceFunction) {
+      return { success: false, error: "Price Function not found. Please deploy the app first." };
+    }
+
+    // 2. Create the Automatic Discount using this function
+    const response = await admin.graphql(
+      `#graphql
+      mutation CreateAutomaticDiscount($discount: DiscountAutomaticAppInput!) {
+        discountAutomaticAppCreate(automaticAppDiscount: $discount) {
+          automaticAppDiscount {
+            id
+            title
+            status
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }`,
+      {
+        variables: {
+          discount: {
+            title: "App Price Override",
+            functionId: priceFunction.id,
+            startsAt: new Date().toISOString(),
+            combinesWith: {
+              orderDiscounts: true,
+              productDiscounts: true,
+              shippingDiscounts: true
+            }
+          }
+        }
+      }
+    );
+
+    const responseJson = await response.json();
+    const errors = responseJson.data.discountAutomaticAppCreate?.userErrors;
+    if (errors && errors.length > 0) {
+      return { success: false, errors };
+    }
+
+    return { success: true, discount: responseJson.data.discountAutomaticAppCreate?.automaticAppDiscount };
+  }
 
   const productId = formData.get("productId");
   const variantId = formData.get("variantId");
@@ -113,15 +181,15 @@ export const action = async ({ request }) => {
     );
   }
 
-  // Update Price
+  // Update Price (Metafield)
   if (price && variantId) {
     await admin.graphql(
       `#graphql
-      mutation updateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-          productVariants {
-            id
-            price
+      mutation updateVariantMetafield($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            key
+            value
           }
           userErrors {
             field
@@ -131,8 +199,15 @@ export const action = async ({ request }) => {
       }`,
       {
         variables: {
-          productId: productId,
-          variants: [{ id: variantId, price: price }]
+          metafields: [
+            {
+              ownerId: variantId,
+              namespace: "gd_product_updater",
+              key: "app_price",
+              type: "number_decimal",
+              value: price
+            }
+          ]
         }
       }
     );
@@ -191,9 +266,35 @@ export default function Index() {
     setSearchParams(newParams);
   }
 
+  const enableDiscount = () => {
+    submit({ actionType: "createDiscount" }, { method: "post" });
+  };
+
   return (
     <s-page heading="Product Updater">
       <s-section>
+        {/* Global Controls */}
+        <div style={{ marginBottom: '20px', padding: '16px', background: '#e3f1df', borderRadius: '8px', border: '1px solid #b7eb8f' }}>
+          <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: 'bold' }}>Setup Required</h3>
+          <p style={{ margin: '0 0 10px 0', fontSize: '13px' }}>
+            To enable price overrides in Checkout/Cart, you must activate the app discount rule.
+          </p>
+          <button
+            onClick={enableDiscount}
+            style={{
+              padding: '6px 12px',
+              background: '#2c6ecb',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}
+          >
+            Enable Price Override Rule
+          </button>
+        </div>
+
         {/* Controls Bar */}
         <div style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <Form method="get" action="/app" onChange={handleSearchChange}>
@@ -376,6 +477,7 @@ function ProductRow({ product, shopify, view }) {
 
   const isGrid = view === 'grid';
 
+
   return (
     <s-box
       padding="base"
@@ -385,6 +487,8 @@ function ProductRow({ product, shopify, view }) {
       style={{ height: '100%', boxSizing: 'border-box' }}
     >
       <fetcher.Form method="post" style={{ height: '100%' }}>
+        {/* ... existing form inputs */}
+
         <input type="hidden" name="productId" value={product.id} />
         <input type="hidden" name="variantId" value={variant?.id} />
 
@@ -454,7 +558,7 @@ function ProductRow({ product, shopify, view }) {
               <input
                 type="text"
                 name="price"
-                defaultValue={variant?.price}
+                defaultValue={variant?.metafield?.value || variant?.price}
                 style={{ width: '100%', padding: '6px', border: '1px solid #8c9196', borderRadius: '4px', fontSize: '13px' }}
               />
             </div>
